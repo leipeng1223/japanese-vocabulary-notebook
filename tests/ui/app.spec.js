@@ -49,6 +49,7 @@ for(const width of [375,768,1280]) test(`layout no overlap at ${width}px, includ
   expect(await page.locator('#dictionary-dialog').evaluate(node=>node.scrollWidth<=node.clientWidth+1)).toBe(true);
   await page.screenshot({path:`test-results/dictionary-${width}.png`});
   await page.locator('.dictionary-result').click();await expect(page.locator('#word-title')).toHaveText('新增单词');
+  await expect(page.locator('#word-form [name="note"]')).toHaveValue('');
   expect(await inspect('#word-form .actions, #word-form .dialog-header')).not.toContain(true);
   expect(await page.locator('#word-dialog').evaluate(node=>node.scrollWidth<=node.clientWidth+1)).toBe(true);
 });

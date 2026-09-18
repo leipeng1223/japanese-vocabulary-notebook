@@ -137,7 +137,7 @@ $('#dictionary-form').onsubmit = async event => {
     for (const item of data.results) {
       const result = element('button', 'dictionary-result', ''); result.type = 'button';
       result.append(element('span', 'result-word', item.word), element('span', 'result-reading', item.reading), element('span', 'result-definition', item.meaning || '中文翻译暂不可用'), element('span', 'result-english', item.definitionEn), element('span', 'result-hint', '填入单词本 →'));
-      result.onclick = () => { $('#dictionary-dialog').close(); openWord(null, { word: item.word, reading: item.reading, meaning: item.meaning, note: `词典：Jisho${item.partOfSpeech ? `；词性：${item.partOfSpeech}` : ''}` }); };
+      result.onclick = () => { $('#dictionary-dialog').close(); openWord(null, { word: item.word, reading: item.reading, meaning: item.meaning }); };
       $('#results').append(result);
     }
   } catch (error) { if (serial === lookupSerial && current === generation) $('#dictionary-status').textContent = error.message; }
