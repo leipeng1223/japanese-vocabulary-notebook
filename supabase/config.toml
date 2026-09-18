@@ -4,3 +4,31 @@ project_id = "gyakuten-vocab-cloud"
 # The handler validates every bearer token with Supabase Auth getUser.
 # This supports both current asymmetric and legacy JWT signing keys.
 verify_jwt = false
+
+[auth]
+additional_redirect_urls = [
+  "http://localhost:8001/**",
+  "http://127.0.0.1:8001/**",
+  "https://leipeng1223.github.io/japanese-vocabulary-notebook/**",
+]
+site_url = "https://leipeng1223.github.io/japanese-vocabulary-notebook/"
+
+[auth.email]
+enable_confirmations = true
+max_frequency = "1m0s"
+otp_length = 8
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+[db.pooler]
+default_pool_size = 15
+max_client_conn = 200
+
+[storage.analytics]
+enabled = true
+max_namespaces = 10
+
+[storage.image_transformation]
+enabled = true
