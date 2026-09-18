@@ -1,0 +1,6 @@
+{
+  "imports": {
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.57.4",
+    "wanakana": "npm:wanakana@5.3.1"
+  }
+}

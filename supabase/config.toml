@@ -1,0 +1,6 @@
+project_id = "gyakuten-vocab-cloud"
+
+[functions.dictionary]
+# The handler validates every bearer token with Supabase Auth getUser.
+# This supports both current asymmetric and legacy JWT signing keys.
+verify_jwt = false
