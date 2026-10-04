@@ -18,7 +18,17 @@ test('Postgres migration: RLS, transactional imports/deletes, versions, per-acco
     assert.equal((await db.query('select public.import_words($1::jsonb) as count',[JSON.stringify(rows)])).rows[0].count,2);
     assert.equal((await db.query('select public.import_words($1::jsonb) as count',[JSON.stringify(rows)])).rows[0].count,0);
     const before=(await db.query('select * from public.words order by word')).rows;
+    await db.exec('reset role');
+    await db.exec(await readFile(new URL('../supabase/migrations/202610040001_sources.sql',import.meta.url),'utf8'));
+    await asUser(a);
+    assert.equal((await db.query("select count(*)::integer as count from public.words where source='逆转裁判'")).rows[0].count,2);
+    assert.equal((await db.query('select * from public.word_sources')).rows.length,1);
+    assert.equal((await db.query('select public.import_words($1::jsonb) as count',[JSON.stringify([{...rows[0],source:'日常生活'}])])).rows[0].count,1);
+    assert.equal((await db.query('select public.import_words($1::jsonb) as count',[JSON.stringify([{...rows[0],source:'日常生活'}])])).rows[0].count,0);
+    await db.query("delete from public.words where source='日常生活'");
     await asUser(b); assert.equal((await db.query('select * from public.words')).rows.length,0);
+    assert.equal((await db.query('select * from public.word_sources')).rows.length,1);
+    await assert.rejects(db.query('insert into public.word_sources(user_id,name) values($1,$2)',[a,'越权来源']));
     await assert.rejects(db.query('insert into public.words(user_id,word) values($1,$2)',[a,'不正アクセス']));
     assert.equal((await db.query('update public.words set meaning=$1 where id=$2 returning id',['changed',before[0].id])).rows.length,0);
     await assert.rejects(db.query('select public.delete_words_checked($1::jsonb)',[JSON.stringify(before.map(({id,version})=>({id,version})))]));

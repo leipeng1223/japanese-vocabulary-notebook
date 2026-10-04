@@ -4,6 +4,15 @@ const key = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
 export const configured = Boolean(url && key && /^https:\/\//.test(url));
 // Only a publishable / legacy anon key belongs here. RLS enforces account isolation.
 export const client = configured ? createClient(url, key) : null;
+export async function fetchSources() {
+  const { data, error } = await client.from('word_sources').select('name').order('name');
+  if (error) throw error;
+  return data.map(row => row.name);
+}
+export async function addSource(name, userId) {
+  const { error } = await client.from('word_sources').upsert({ name, user_id: userId }, { onConflict: 'user_id,name', ignoreDuplicates: true });
+  if (error) throw error;
+}
 export async function fetchWords() {
   const all = [];
   for (let from = 0; ; from += 500) {

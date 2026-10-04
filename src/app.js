@@ -1,15 +1,28 @@
-import { client, configured, fetchWords, writeWord, removeWords, insertWords } from './api.js';
+import { client, configured, fetchWords, fetchSources, addSource, writeWord, removeWords, insertWords } from './api.js';
 import { fields, cleanWord, parseText, parseBackup, uniqueNewWords } from './model.js';
 
 const $ = selector => document.querySelector(selector);
 let user = null, words = [], editing = null, reviewId = null, importRows = [], channel = null;
 let generation = 0, loadSerial = 0, busy = false, lookupSerial = 0;
 const selected = new Set();
+let sources = [], activeSource = '逆转裁判';
+const sourceWords = () => words.filter(row => (row.source || '逆转裁判') === activeSource);
+function renderSources() {
+  const names = [...new Set(['逆转裁判', ...sources, ...words.map(row => row.source || '逆转裁判')])];
+  $('#source-tabs').replaceChildren();
+  for (const name of names) {
+    const button = element('button', name === activeSource ? 'primary' : '', name);
+    button.type = 'button'; button.setAttribute('aria-pressed', String(name === activeSource));
+    button.onclick = () => { if (busy) return; activeSource = name; selected.clear(); reviewId = null; $('#search').value = ''; renderSources(); renderWords(); };
+    $('#source-tabs').append(button);
+  }
+  $('#source-context').textContent = `当前来源：${activeSource} · 新增和导入单词将保存到此来源`;
+}
 const status = (message, error = false) => { $('#status').textContent = message; $('#status').classList.toggle('error', error); };
 function element(tag, className, text) { const node = document.createElement(tag); node.className = className; node.textContent = text; return node; }
 function visibleWords() {
   const query = $('#search').value.trim().toLowerCase();
-  const rows = words.filter(row => fields.map(f => row[f]).join(' ').toLowerCase().includes(query));
+  const rows = sourceWords().filter(row => fields.map(f => row[f]).join(' ').toLowerCase().includes(query));
   return rows.sort((a, b) => $('#sort').value === 'word' ? a.word.localeCompare(b.word, 'ja') : ($('#sort').value === 'oldest' ? 1 : -1) * (a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)));
 }
 function renderSelection() {
@@ -25,7 +38,7 @@ function renderWords() {
   for (const id of selected) if (!ids.has(id)) selected.delete(id);
   const visible = visibleWords(), list = $('#word-list');
   list.replaceChildren();
-  $('#word-count').textContent = `共 ${words.length} 个单词${$('#search').value ? ` · 当前 ${visible.length} 个` : ''}`;
+  $('#word-count').textContent = `共 ${sourceWords().length} 个单词${$('#search').value ? ` · 当前 ${visible.length} 个` : ''}`;
   if (!visible.length) list.append(element('p', 'empty', words.length ? '没有匹配的单词。' : '还没有单词。新增一条，或导入本地版备份。'));
   for (const row of visible) {
     const card = element('article', 'word-item' + (selected.has(row.id) ? ' selected' : ''), '');
@@ -47,9 +60,9 @@ async function sync(quiet = false) {
   const current = generation, serial = ++loadSerial;
   try {
     if (!quiet) status('正在同步…');
-    const rows = await fetchWords();
+    const [rows, names] = await Promise.all([fetchWords(), fetchSources()]);
     if (current !== generation || serial !== loadSerial || busy) return;
-    words = rows; renderWords(); status(`已同步 · ${new Date().toLocaleTimeString()}`);
+    words = rows; sources = names; renderSources(); renderWords(); status(`已同步 · ${new Date().toLocaleTimeString()}`);
   } catch (error) { if (current === generation) status(`同步失败，仍显示上次读取的数据：${error.message}`, true); }
 }
 async function mutation(button, action, done, errorTarget = '#status') {
@@ -69,6 +82,8 @@ function openWord(row = null, draft = null) {
   editing = row ? { ...row } : null;
   $('#word-form').reset(); $('#word-title').textContent = row ? '编辑单词' : '新增单词';
   for (const field of fields) $('#word-form').elements[field].value = (row || draft)?.[field] || '';
+  $('#word-form').elements.source.replaceChildren(...[...new Set([activeSource, ...sources, ...words.map(item => item.source || '逆转裁判')])].map(name => new Option(name, name)));
+  $('#word-form').elements.source.value = row?.source || activeSource;
   $('#delete-one').hidden = !row; $('#save-status').textContent = '';
   $('#word-dialog').showModal(); $('#word-form').elements.word.focus();
 }
@@ -90,17 +105,18 @@ $('#delete-selected').onclick = () => {
 };
 function renderReview() {
   const card = $('#review-card'); card.replaceChildren();
-  let row = words.find(item => item.id === reviewId);
-  if (!row) row = words[Math.floor(Math.random() * words.length)];
+  const pool = sourceWords();
+  let row = pool.find(item => item.id === reviewId);
+  if (!row) row = pool[Math.floor(Math.random() * pool.length)];
   reviewId = row?.id;
-  $('#review-count').textContent = `从 ${words.length} 个单词中随机抽取`;
+  $('#review-count').textContent = `从 ${pool.length} 个单词中随机抽取`;
   if (!row) { card.textContent = '添加单词后即可开始复习'; return; }
   const answer = element('span', 'review-answer', ''); answer.hidden = true;
   answer.append(element('span', 'reading', row.reading || '读音待补充'), element('p', 'meaning', row.meaning || '释义待补充'), element('p', 'example', row.example));
   card.append(element('span', 'review-word', row.word), answer);
   card.onclick = () => { answer.hidden = !answer.hidden; };
 }
-$('#next').onclick = () => { const pool = words.filter(row => row.id !== reviewId); if (pool.length) reviewId = pool[Math.floor(Math.random() * pool.length)].id; renderReview(); };
+$('#next').onclick = () => { const pool = sourceWords().filter(row => row.id !== reviewId); if (pool.length) reviewId = pool[Math.floor(Math.random() * pool.length)].id; renderReview(); };
 $('#json-file').onchange = async event => {
   importRows = []; $('#import-json-button').disabled = true;
   const file = event.target.files[0]; if (!file) return;
@@ -112,7 +128,7 @@ $('#json-file').onchange = async event => {
   } catch (error) { $('#import-summary').textContent = `无法导入：${error.message}`; }
 };
 async function importBatch(rows, button, finish) {
-  const unique = uniqueNewWords(rows, words);
+  const unique = uniqueNewWords(rows.map(row => ({ ...row, source: activeSource })), words);
   if (!unique.length) { status('没有需要导入的新单词'); return; }
   await mutation(button, () => insertWords(unique), count => { finish(); status(`已导入 ${count} 个单词`); $('#import-summary').textContent = `已保存 ${count} 个新词，其他重复项已跳过。`; });
 }
@@ -152,6 +168,15 @@ for (const tab of document.querySelectorAll('.tab')) tab.onclick = () => {
 $('#search').oninput = () => { selected.clear(); renderWords(); }; $('#sort').onchange = renderWords;
 $('#select-all').onchange = event => { for (const row of visibleWords()) event.target.checked ? selected.add(row.id) : selected.delete(row.id); renderWords(); };
 $('#add').onclick = () => openWord(); $('#refresh').onclick = () => sync();
+$('#add-source').onclick = () => { $('#source-form').reset(); $('#source-status').textContent = ''; $('#source-dialog').showModal(); $('#source-name').focus(); };
+$('#source-form').onsubmit = async event => {
+  event.preventDefault(); const name = $('#source-name').value.trim();
+  if (!name || name.length > 80) { $('#source-status').textContent = '来源名称须为 1 至 80 个字符'; return; }
+  await mutation($('#save-source'), () => addSource(name, user.id), () => {
+    sources = [...new Set([...sources, name])]; activeSource = name; selected.clear(); reviewId = null;
+    $('#search').value = ''; $('#source-dialog').close(); renderSources(); renderWords();
+  }, '#source-status');
+};
 async function authenticate(signup = false) {
   if (!$('#auth-form').reportValidity()) return;
   const controls = [...$('#auth-form').querySelectorAll('button')]; controls.forEach(b => b.disabled = true);
@@ -171,6 +196,7 @@ async function applySession(session) {
   const next = session?.user || null;
   if (next?.id === user?.id && user) return;
   ++generation; ++lookupSerial; ++loadSerial; user = next; words = []; selected.clear(); reviewId = null; importRows = [];
+  sources = []; activeSource = '逆转裁判'; renderSources();
   $('#json-file').value = ''; $('#import-text').value = ''; $('#import-summary').textContent = ''; $('#import-json-button').disabled = true;
   $('#word-form').reset(); $('#query').value = ''; $('#results').replaceChildren(); $('#dictionary-status').textContent = '';
   for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();

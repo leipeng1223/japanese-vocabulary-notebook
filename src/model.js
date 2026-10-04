@@ -6,7 +6,9 @@ export function cleanWord(item) {
   const timestamp = item.created_at ?? item.createdAt;
   const date = timestamp == null ? new Date() : new Date(timestamp);
   if (Number.isNaN(date.getTime())) throw new Error('词条添加时间不正确');
-  return { ...row, created_at: date.toISOString() };
+  const source = String(item.source ?? '逆转裁判').trim();
+  if (!source || source.length > 80) throw new Error('来源名称须为 1 至 80 个字符');
+  return { ...row, source, created_at: date.toISOString() };
 }
 export function parseText(text) {
   return text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {
@@ -22,7 +24,7 @@ export function parseBackup(text) {
   return rows.map(cleanWord);
 }
 export function uniqueNewWords(rows, existing) {
-  const key = row => `${row.word.normalize('NFKC')}\0${row.reading.normalize('NFKC')}`;
+  const key = row => `${row.source ?? '逆转裁判'}\0${row.word.normalize('NFKC')}\0${row.reading.normalize('NFKC')}`;
   const known = new Set(existing.map(key));
   return rows.filter(row => { const k = key(row); if (known.has(k)) return false; known.add(k); return true; });
 }
