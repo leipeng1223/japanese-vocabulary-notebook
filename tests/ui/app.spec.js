@@ -20,7 +20,7 @@ async function mockCloud(page) {
       if(state.conflict) return json(null);
       const body=request.postDataJSON();
       if(method==='POST'){const row={...body,id:'00000000-0000-4000-8000-000000000012',version:1};state.rows.push(row);return json(row);}
-      if(method==='PATCH'){Object.assign(state.rows[0],body,{version:state.rows[0].version+1});return json(state.rows[0]);}
+      if(method==='PATCH'){const row=state.rows.find(row=>`eq.${row.id}`===url.searchParams.get('id'));Object.assign(row,body,{version:row.version+1});return json(row);}
     }
     if(url.pathname.endsWith('/delete_words_checked')) { const ids=request.postDataJSON().targets.map(t=>t.id);state.rows=state.rows.filter(row=>!ids.includes(row.id));return json(ids.length); }
     if(url.pathname.endsWith('/dictionary')) return json({query:'しょうこひん',warning:'',results:[{word:'証拠品の非常に長いテスト用語'.repeat(3),reading:'しょうこひん'.repeat(8),meaning:'这是用来验证长中文释义自动换行的测试文本。'.repeat(15),definitionEn:'Evidence '.repeat(80),partOfSpeech:'Noun'}]});
@@ -52,13 +52,78 @@ test('sources persist, filter words and review, and receive new dictionary words
   await page.getByRole('button',{name:'随机复习',exact:true}).click();await expect(page.locator('.review-word')).toHaveText('証拠品');
   await page.reload();await expect(page.locator('#source-tabs')).toContainText('日常生活');
 });
+for(const width of [375,1280]) test(`review six cards in three rows, without repeats at ${width}px`,async({page})=>{
+  await page.setViewportSize({width,height:950});
+  const state=await mockCloud(page);await login(page);
+  state.rows=Array.from({length:13},(_,i)=>({...initial,id:`review-${i}`,word:`单词${i}`,source:'逆转裁判'}));
+  await page.locator('#refresh').click();await expect(page.locator('#word-count')).toHaveText('共 13 个单词');
+  await page.getByRole('button',{name:'随机复习',exact:true}).click();
+  const cards=page.locator('.review-card'),words=page.locator('.review-word');
+  await expect(cards).toHaveCount(6);
+  const aligned = await cards.first().locator('.card-actions').evaluate(node => {
+    const [edit, star] = [...node.children].map(child => child.getBoundingClientRect());
+    return edit.y === star.y && edit.width === star.width && edit.height === star.height && edit.right <= star.left;
+  });
+  expect(aligned).toBe(true);
+  expect(await cards.first().evaluate(node => {
+    const word=node.querySelector('.review-word').getBoundingClientRect(), icon=node.querySelector('.edit-button').getBoundingClientRect();
+    return Math.abs(word.top-icon.top)<5;
+  })).toBe(true);
+  await cards.first().locator('.edit-button').click();await expect(page.locator('#word-title')).toHaveText('编辑单词');
+  await page.getByRole('button',{name:'取消',exact:true}).click();
+  const first=await words.allTextContents();
+  const boxes=await cards.evaluateAll(nodes=>nodes.map(n=>({x:n.offsetLeft,y:n.offsetTop})));
+  expect(new Set(boxes.map(b=>b.x)).size).toBe(2);expect(new Set(boxes.map(b=>b.y)).size).toBe(3);
+  await cards.first().locator('.review-reveal').click();await expect(cards.first().locator('.review-answer')).toBeVisible();
+  await expect(cards.nth(1).locator('.review-answer')).toBeHidden();
+  await page.locator('#refresh').click();await expect(words).toHaveText(first);
+  await expect(cards.first().locator('.review-answer')).toBeVisible();
+  await page.locator('#next').click();await expect(cards).toHaveCount(6);
+  const second=await words.allTextContents();expect(second.some(w=>first.includes(w))).toBe(false);
+  await page.locator('#next').click();await expect(cards).toHaveCount(1);
+  expect([...first,...second]).not.toContain((await words.allTextContents())[0]);
+  await expect(page.locator('#next')).toBeDisabled();await expect(page.locator('#restart-review')).toBeVisible();
+  await page.locator('#restart-review').click();await expect(cards).toHaveCount(6);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+});
+test('stars persist, failures are visible, and focused review filters by source without repeats',async({page})=>{
+  const state=await mockCloud(page);await login(page);
+  state.failSave=true;await page.locator('.word-item .star-button').click();
+  await expect(page.locator('#status')).toContainText('操作未完成');
+  await expect(page.locator('.word-item .star-button')).toHaveAttribute('aria-pressed','false');
+  state.failSave=false;await page.locator('.word-item .star-button').click();
+  await expect(page.locator('.word-item .star-button')).toHaveAttribute('aria-pressed','true');
+  await page.reload();await expect(page.locator('.word-item .star-button')).toHaveAttribute('aria-pressed','true');
+  state.rows=Array.from({length:10},(_,i)=>({...initial,id:`star-${i}`,word:`重点${i}`,source:i===9?'其他来源':'逆转裁判',is_starred:i!==8}));
+  await page.locator('#refresh').click();await expect(page.locator('#word-count')).toHaveText('共 9 个单词');
+  await page.getByRole('button',{name:'随机复习',exact:true}).click();await page.locator('#starred-only').check();
+  await expect(page.locator('.review-card')).toHaveCount(6);
+  const first=await page.locator('.review-word').allTextContents();expect(first).not.toContain('重点8');expect(first).not.toContain('重点9');
+  await page.locator('#next').click();await expect(page.locator('.review-card')).toHaveCount(2);
+  expect((await page.locator('.review-word').allTextContents()).some(w=>first.includes(w))).toBe(false);
+  await expect(page.locator('#next')).toBeDisabled();
+  await page.locator('.review-card .star-button').first().click();await expect(page.locator('.review-card')).toHaveCount(1);
+  await expect(page.locator('.review-answer')).toBeHidden();
+  await page.locator('.review-card .star-button').click();await expect(page.locator('.review-card')).toHaveCount(0);
+  await expect(page.locator('#restart-review')).toBeVisible();
+});
 for(const width of [375,768,1280]) test(`layout no overlap at ${width}px, including long dictionary results`,async({page})=>{
   await page.setViewportSize({width,height:950});await mockCloud(page);await login(page);
+  await expect(page.locator('.edit-button svg')).toHaveCount(1);
+  const actionBoxes = await page.locator('.word-item .card-actions').evaluate(node => [...node.children].map(child => {
+    const box = child.getBoundingClientRect(); return { y: box.y, width: box.width, height: box.height, left: box.left, right: box.right };
+  }));
+  expect(actionBoxes[0].y).toBe(actionBoxes[1].y);
+  expect(actionBoxes[0].height).toBe(actionBoxes[1].height);
+  expect(actionBoxes[0].right).toBeLessThanOrEqual(actionBoxes[1].left);
+  const titleBox=await page.locator('.word-item h2').boundingBox();
+  expect(Math.abs(titleBox.y-actionBoxes[0].y)).toBeLessThan(1);
+  await page.screenshot({path:`test-results/card-actions-${width}.png`});
   const inspect=async(selector)=>page.locator(selector).evaluateAll(nodes=>nodes.map(node=>{
     const boxes=[...node.children].filter(c=>getComputedStyle(c).display!=='none').map(c=>c.getBoundingClientRect());
     return boxes.some((a,i)=>boxes.slice(i+1).some(b=>Math.min(a.right,b.right)-Math.max(a.left,b.left)>1 && Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>1));
   }));
-  expect(await inspect('.word-item, .workspace-heading, .account-bar, .selection-bar')).not.toContain(true);
+  expect(await inspect('.word-item, .word-heading, .workspace-heading, .account-bar, .selection-bar')).not.toContain(true);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   await page.locator('#lookup').click();await page.locator('#query').fill('shouko hin');await page.locator('#lookup-submit').click();await expect(page.locator('.dictionary-result')).toHaveCount(1);
   expect(await inspect('.dictionary-result, .dialog-header')).not.toContain(true);

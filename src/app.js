@@ -2,7 +2,16 @@ import { client, configured, fetchWords, fetchSources, addSource, writeWord, rem
 import { fields, cleanWord, parseText, parseBackup, uniqueNewWords } from './model.js';
 
 const $ = selector => document.querySelector(selector);
-let user = null, words = [], editing = null, reviewId = null, importRows = [], channel = null;
+let user = null, words = [], editing = null, importRows = [], channel = null;
+const reviewSessions = new Map();
+let starredOnly = false;
+const reviewKey = () => JSON.stringify([activeSource, starredOnly]);
+const reviewPool = () => sourceWords().filter(row => !starredOnly || row.is_starred);
+function reviewSession() {
+  const key = reviewKey();
+  if (!reviewSessions.has(key)) reviewSessions.set(key, { seen: new Set(), ids: [], revealed: new Set(), started: false });
+  return reviewSessions.get(key);
+}
 let generation = 0, loadSerial = 0, busy = false, lookupSerial = 0;
 const selected = new Set();
 let sources = [], activeSource = '逆转裁判';
@@ -13,13 +22,40 @@ function renderSources() {
   for (const name of names) {
     const button = element('button', name === activeSource ? 'primary' : '', name);
     button.type = 'button'; button.setAttribute('aria-pressed', String(name === activeSource));
-    button.onclick = () => { if (busy) return; activeSource = name; selected.clear(); reviewId = null; $('#search').value = ''; renderSources(); renderWords(); };
+    button.onclick = () => { if (busy) return; activeSource = name; selected.clear(); $('#search').value = ''; renderSources(); renderWords(); };
     $('#source-tabs').append(button);
   }
   $('#source-context').textContent = `当前来源：${activeSource} · 新增和导入单词将保存到此来源`;
 }
 const status = (message, error = false) => { $('#status').textContent = message; $('#status').classList.toggle('error', error); };
 function element(tag, className, text) { const node = document.createElement(tag); node.className = className; node.textContent = text; return node; }
+function cardActions(row) {
+  const actions = element('div', 'card-actions', '');
+  const edit = element('button', 'edit-button', ''); edit.type = 'button';
+  edit.setAttribute('aria-label', `编辑 ${row.word}`); edit.title = '编辑单词';
+  // Lucide square-pen (ISC): inline SVG avoids an external icon dependency.
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  for (const [name, value] of Object.entries({ viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) svg.setAttribute(name, value);
+  for (const d of ['M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7', 'M16 3a2.1 2.1 0 0 1 3 3L9 16l-4 1 1-4Z']) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', d); svg.append(path);
+  }
+  edit.append(svg); edit.onclick = event => { event.stopPropagation(); openWord(row); };
+  actions.append(edit, starButton(row)); return actions;
+}
+function starButton(row) {
+  const button = element('button', 'star-button' + (row.is_starred ? ' starred' : ''), row.is_starred ? '★' : '☆');
+  button.type = 'button';
+  button.setAttribute('aria-label', `${row.is_starred ? '取消重点生词' : '标记重点生词'}：${row.word}`);
+  button.setAttribute('aria-pressed', String(Boolean(row.is_starred)));
+  button.onclick = event => {
+    event.stopPropagation();
+    mutation(button, () => writeWord({ is_starred: !row.is_starred }, row, user.id), updated => {
+      words = words.map(word => word.id === updated.id ? updated : word);
+      renderWords();
+    });
+  };
+  return button;
+}
 function visibleWords() {
   const query = $('#search').value.trim().toLowerCase();
   const rows = sourceWords().filter(row => fields.map(f => row[f]).join(' ').toLowerCase().includes(query));
@@ -43,15 +79,15 @@ function renderWords() {
   for (const row of visible) {
     const card = element('article', 'word-item' + (selected.has(row.id) ? ' selected' : ''), '');
     const content = element('div', 'word-content', '');
-    content.append(element('h2', 'word', row.word), element('p', 'reading', row.reading || '读音待补充'), element('p', 'meaning', row.meaning || '释义待补充'));
+    const heading = element('div', 'word-heading', '');
+    heading.append(element('h2', 'word', row.word), cardActions(row));
+    content.append(heading, element('p', 'reading', row.reading || '读音待补充'), element('p', 'meaning', row.meaning || '释义待补充'));
     if (row.example) content.append(element('p', 'example', `例　${row.example}`));
     if (row.note) content.append(element('p', 'note', `注　${row.note}`));
-    const edit = element('button', 'edit-button', '编辑');
-    edit.onclick = () => openWord(row);
     const label = element('label', 'word-select', ''), checkbox = document.createElement('input');
     checkbox.type = 'checkbox'; checkbox.checked = selected.has(row.id); checkbox.setAttribute('aria-label', `选择 ${row.word}`);
     checkbox.onchange = () => { checkbox.checked ? selected.add(row.id) : selected.delete(row.id); card.classList.toggle('selected', checkbox.checked); renderSelection(); };
-    label.append(checkbox); card.append(content, edit, label); list.append(card);
+    label.append(checkbox); card.append(content, label); list.append(card);
   }
   renderSelection(); renderReview();
 }
@@ -104,19 +140,43 @@ $('#delete-selected').onclick = () => {
   mutation($('#delete-selected'), () => removeWords(targets), () => selected.clear());
 };
 function renderReview() {
-  const card = $('#review-card'); card.replaceChildren();
-  const pool = sourceWords();
-  let row = pool.find(item => item.id === reviewId);
-  if (!row) row = pool[Math.floor(Math.random() * pool.length)];
-  reviewId = row?.id;
-  $('#review-count').textContent = `从 ${pool.length} 个单词中随机抽取`;
-  if (!row) { card.textContent = '添加单词后即可开始复习'; return; }
-  const answer = element('span', 'review-answer', ''); answer.hidden = true;
-  answer.append(element('span', 'reading', row.reading || '读音待补充'), element('p', 'meaning', row.meaning || '释义待补充'), element('p', 'example', row.example));
-  card.append(element('span', 'review-word', row.word), answer);
-  card.onclick = () => { answer.hidden = !answer.hidden; };
+  if ($('#review-view').hidden) return;
+  const session = reviewSession(), pool = reviewPool();
+  if (!session.started) { nextReviewGroup(); return; }
+  const grid = $('#review-grid'); grid.replaceChildren();
+  const rows = session.ids.map(id => pool.find(row => row.id === id)).filter(Boolean);
+  const remaining = pool.filter(row => !session.seen.has(row.id)).length;
+  $('#review-count').textContent = `本轮已展示 ${pool.length - remaining} / ${pool.length} 个 · 剩余 ${remaining} 个`;
+  $('#next').disabled = !remaining;
+  $('#restart-review').hidden = !pool.length || Boolean(remaining);
+  if (!rows.length) grid.append(element('p', 'empty', remaining ? '点击“换一组”继续复习。' : pool.length ? '本轮复习完成，点击“重新开始”开启新一轮。' : starredOnly ? '此来源还没有重点生词，点击词卡右上角的星星即可标记。' : '添加单词后即可开始复习'));
+  for (const row of rows) {
+    const card = element('div', 'review-card', '');
+    const reveal = element('button', 'review-reveal', ''); reveal.type = 'button';
+    reveal.setAttribute('aria-label', `显示或隐藏 ${row.word} 的答案`);
+    const answer = element('span', 'review-answer', ''); answer.hidden = !session.revealed.has(row.id);
+    reveal.setAttribute('aria-expanded', String(!answer.hidden));
+    answer.append(element('span', 'reading', row.reading || '读音待补充'), element('span', 'meaning', row.meaning || '释义待补充'), element('span', 'example', row.example));
+    reveal.append(element('span', 'review-word', row.word), answer);
+    reveal.onclick = () => {
+      answer.hidden = !answer.hidden;
+      answer.hidden ? session.revealed.delete(row.id) : session.revealed.add(row.id);
+      reveal.setAttribute('aria-expanded', String(!answer.hidden));
+    };
+    card.append(reveal, cardActions(row));
+    grid.append(card);
+  }
 }
-$('#next').onclick = () => { const pool = sourceWords().filter(row => row.id !== reviewId); if (pool.length) reviewId = pool[Math.floor(Math.random() * pool.length)].id; renderReview(); };
+function nextReviewGroup() {
+  const session = reviewSession(), pool = reviewPool().filter(row => !session.seen.has(row.id));
+  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  session.ids = pool.slice(0, 6).map(row => row.id);
+  session.ids.forEach(id => session.seen.add(id)); session.revealed.clear(); session.started = true;
+  renderReview();
+}
+$('#next').onclick = nextReviewGroup;
+$('#restart-review').onclick = () => { reviewSessions.delete(reviewKey()); nextReviewGroup(); };
+$('#starred-only').onchange = event => { starredOnly = event.target.checked; renderReview(); };
 $('#json-file').onchange = async event => {
   importRows = []; $('#import-json-button').disabled = true;
   const file = event.target.files[0]; if (!file) return;
@@ -173,7 +233,7 @@ $('#source-form').onsubmit = async event => {
   event.preventDefault(); const name = $('#source-name').value.trim();
   if (!name || name.length > 80) { $('#source-status').textContent = '来源名称须为 1 至 80 个字符'; return; }
   await mutation($('#save-source'), () => addSource(name, user.id), () => {
-    sources = [...new Set([...sources, name])]; activeSource = name; selected.clear(); reviewId = null;
+    sources = [...new Set([...sources, name])]; activeSource = name; selected.clear();
     $('#search').value = ''; $('#source-dialog').close(); renderSources(); renderWords();
   }, '#source-status');
 };
@@ -195,7 +255,7 @@ $('#logout').onclick = async () => { if (busy) return; const { error } = await c
 async function applySession(session) {
   const next = session?.user || null;
   if (next?.id === user?.id && user) return;
-  ++generation; ++lookupSerial; ++loadSerial; user = next; words = []; selected.clear(); reviewId = null; importRows = [];
+  ++generation; ++lookupSerial; ++loadSerial; user = next; words = []; selected.clear(); reviewSessions.clear(); importRows = [];
   sources = []; activeSource = '逆转裁判'; renderSources();
   $('#json-file').value = ''; $('#import-text').value = ''; $('#import-summary').textContent = ''; $('#import-json-button').disabled = true;
   $('#word-form').reset(); $('#query').value = ''; $('#results').replaceChildren(); $('#dictionary-status').textContent = '';

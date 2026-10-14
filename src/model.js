@@ -8,7 +8,7 @@ export function cleanWord(item) {
   if (Number.isNaN(date.getTime())) throw new Error('词条添加时间不正确');
   const source = String(item.source ?? '逆转裁判').trim();
   if (!source || source.length > 80) throw new Error('来源名称须为 1 至 80 个字符');
-  return { ...row, source, created_at: date.toISOString() };
+  return { ...row, source, ...(typeof item.is_starred === 'boolean' ? { is_starred: item.is_starred } : {}), created_at: date.toISOString() };
 }
 export function parseText(text) {
   return text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).map(line => {

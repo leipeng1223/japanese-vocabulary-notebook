@@ -20,10 +20,15 @@ test('Postgres migration: RLS, transactional imports/deletes, versions, per-acco
     const before=(await db.query('select * from public.words order by word')).rows;
     await db.exec('reset role');
     await db.exec(await readFile(new URL('../supabase/migrations/202610040001_sources.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/202610070001_starred.sql',import.meta.url),'utf8'));
     await asUser(a);
+    assert.equal((await db.query('select is_starred from public.words limit 1')).rows[0].is_starred,false);
+    await db.query('update public.words set is_starred=true where id=$1',[before[1].id]);
+    assert.equal((await db.query('select is_starred from public.words where id=$1',[before[1].id])).rows[0].is_starred,true);
     assert.equal((await db.query("select count(*)::integer as count from public.words where source='逆转裁判'")).rows[0].count,2);
     assert.equal((await db.query('select * from public.word_sources')).rows.length,1);
-    assert.equal((await db.query('select public.import_words($1::jsonb) as count',[JSON.stringify([{...rows[0],source:'日常生活'}])])).rows[0].count,1);
+    assert.equal((await db.query('select public.import_words($1::jsonb) as count',[JSON.stringify([{...rows[0],source:'日常生活',is_starred:true}])])).rows[0].count,1);
+    assert.equal((await db.query("select is_starred from public.words where source='日常生活'")).rows[0].is_starred,true);
     assert.equal((await db.query('select public.import_words($1::jsonb) as count',[JSON.stringify([{...rows[0],source:'日常生活'}])])).rows[0].count,0);
     await db.query("delete from public.words where source='日常生活'");
     await asUser(b); assert.equal((await db.query('select * from public.words')).rows.length,0);
