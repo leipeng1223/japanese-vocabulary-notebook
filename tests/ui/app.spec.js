@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 const user={id:'00000000-0000-4000-8000-000000000001',email:'learner@example.test'};
 const initial={id:'00000000-0000-4000-8000-000000000011',user_id:user.id,word:'証拠品',reading:'しょうこひん',meaning:'证物',example:'証拠品を提出する。',note:'',created_at:'2026-09-01T00:00:00.000Z',version:1};
 async function mockCloud(page) {
-  const state={rows:[{...initial,source:'逆转裁判'}],sources:['逆转裁判'],failSave:false,conflict:false};
+  const state={rows:[{...initial,source:'逆转裁判'}],sources:['逆转裁判'],groups:[],failSave:false,conflict:false};
   await page.route('https://vocab-test.supabase.co/**',async route=>{
     const request=route.request(),url=new URL(request.url()),method=request.method();
     const json=(body,status=200)=>route.fulfill({status,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:JSON.stringify(body)});
@@ -10,6 +10,18 @@ async function mockCloud(page) {
     if(url.pathname.endsWith('/token')) return json({access_token:'test-session-token',refresh_token:'test-refresh-token',token_type:'bearer',expires_in:3600,user});
     if(url.pathname.endsWith('/user')) return json(user);
     if(url.pathname.endsWith('/logout')) return json({});
+    if(url.pathname.endsWith('/confusion_groups')) {
+      if(method==='GET')return json(state.groups);
+      const index=state.groups.findIndex(g=>`eq.${g.id}`===url.searchParams.get('id'));
+      const removed=state.groups.splice(index,1);return json(removed.map(g=>({id:g.id})));
+    }
+    if(url.pathname.endsWith('/save_confusion_group')) {
+      if(state.failSave)return json({message:'模拟保存失败'},503);
+      const body=request.postDataJSON(),previous=state.groups.find(g=>g.id===body.target);
+      if(previous&&previous.version!==body.expected_version)return json({message:'分组已修改'},409);
+      const group={id:body.target||'group-1',title:body.group_title,note:body.group_note,version:(previous?.version||0)+1,confusion_group_words:body.word_ids.map((word_id,position)=>({word_id,position}))};
+      state.groups=state.groups.filter(g=>g.id!==group.id);state.groups.push(group);return json(group.id);
+    }
     if(url.pathname.endsWith('/word_sources')) {
       if(method==='GET') return json(state.sources.map(name=>({name})));
       const {name}=request.postDataJSON();state.sources.push(name);return json(null,201);
@@ -60,6 +72,8 @@ for(const width of [375,1280]) test(`review six cards in three rows, without rep
   await page.getByRole('button',{name:'随机复习',exact:true}).click();
   const cards=page.locator('.review-card'),words=page.locator('.review-word');
   await expect(cards).toHaveCount(6);
+  const reviewFont=await words.first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize));
+  expect(reviewFont).toBeCloseTo(Math.min(32,Math.max(17.6,width*.03))-2,1);
   const aligned = await cards.first().locator('.card-actions').evaluate(node => {
     const [edit, star] = [...node.children].map(child => child.getBoundingClientRect());
     return edit.y === star.y && edit.width === star.width && edit.height === star.height && edit.right <= star.left;
@@ -85,6 +99,33 @@ for(const width of [375,1280]) test(`review six cards in three rows, without rep
   await expect(page.locator('#next')).toBeDisabled();await expect(page.locator('#restart-review')).toBeVisible();
   await page.locator('#restart-review').click();await expect(cards).toHaveCount(6);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+});
+for(const width of [375,1280]) test(`confusion groups save, compare, self-test and edit at ${width}px`,async({page})=>{
+  await page.setViewportSize({width,height:1000});const state=await mockCloud(page);await login(page);
+  state.rows.push({...initial,id:'second',word:'証言',source:'日常生活',meaning:'证言'});
+  await page.locator('#refresh').click();await expect(page.locator('#source-tabs')).toContainText('日常生活');
+  await page.getByRole('button',{name:'易混淆',exact:true}).click();
+  await page.locator('#add-confusion').click();await page.locator('#save-confusion').click();await expect(page.locator('#group-status')).toContainText('请选择');
+  await page.getByLabel('加入 証拠品',{exact:true}).check();
+  await page.locator('#group-source').selectOption('日常生活');await page.getByLabel('加入 証言',{exact:true}).check();
+  await page.locator('#group-note').fill('物证和口头证言的区别');state.failSave=true;
+  await page.locator('#save-confusion').click();await expect(page.locator('#group-status')).toContainText('操作未完成');await expect(page.locator('#group-chosen .chosen-word')).toHaveCount(2);
+  state.failSave=false;await page.locator('#save-confusion').click();await expect(page.locator('#confusion-dialog')).not.toBeVisible();
+  await expect(page.locator('.confusion-group h2')).toHaveText('証拠品／証言');await expect(page.locator('.confusion-word')).toHaveCount(2);
+  await page.reload();await expect(page.locator('#word-count')).toHaveText('共 1 个单词');await page.getByRole('button',{name:'易混淆',exact:true}).click();
+  await expect(page.locator('.confusion-word')).toHaveCount(2);
+  await page.locator('#confusion-self-test').check();await expect(page.locator('.confusion-answer').first()).toBeHidden();
+  await expect(page.locator('.source-chip').first()).toBeHidden();
+  expect(await page.locator('.answer-toggle').first().evaluate(el=>getComputedStyle(el).display)).toBe('block');
+  const lookupFont=await page.locator('#lookup').evaluate(el=>getComputedStyle(el).fontSize);
+  for(const button of await page.locator('.confusion-group .actions button').all())expect(await button.evaluate(el=>getComputedStyle(el).fontSize)).toBe(lookupFont);
+  await page.locator('.answer-toggle').first().click();await expect(page.locator('.confusion-answer').first()).toBeVisible();await expect(page.locator('.confusion-answer').nth(1)).toBeHidden();
+  await page.getByRole('button',{name:'编辑组',exact:true}).click();await page.locator('#group-title').fill('证据与证言');await page.getByLabel('上移 証言',{exact:true}).click();await page.locator('#save-confusion').click();
+  await expect(page.locator('.confusion-word h3').first()).toHaveText('証言');
+  await page.locator('#confusion-search').fill('没有这个组');await expect(page.locator('.confusion-group')).toHaveCount(0);await page.locator('#confusion-search').fill('');
+  await page.locator('#confusion-self-test').uncheck();await page.screenshot({path:`test-results/confusion-${width}.png`,fullPage:true});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'删除组',exact:true}).click();await expect(page.locator('.confusion-group')).toHaveCount(0);expect(state.rows).toHaveLength(2);
 });
 test('stars persist, failures are visible, and focused review filters by source without repeats',async({page})=>{
   const state=await mockCloud(page);await login(page);

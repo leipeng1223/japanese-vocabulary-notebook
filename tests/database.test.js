@@ -21,6 +21,7 @@ test('Postgres migration: RLS, transactional imports/deletes, versions, per-acco
     await db.exec('reset role');
     await db.exec(await readFile(new URL('../supabase/migrations/202610040001_sources.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/202610070001_starred.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/202610280001_confusion.sql',import.meta.url),'utf8'));
     await asUser(a);
     assert.equal((await db.query('select is_starred from public.words limit 1')).rows[0].is_starred,false);
     await db.query('update public.words set is_starred=true where id=$1',[before[1].id]);
@@ -50,7 +51,21 @@ test('Postgres migration: RLS, transactional imports/deletes, versions, per-acco
     assert.equal((await db.query('select public.consume_dictionary_quota() as ok')).rows[0].ok,false);
     await assert.rejects(db.query('update public.dictionary_usage set calls=0'));
     const current=(await db.query('select id,version from public.words')).rows;
+    const save='select public.save_confusion_group($1,$2,$3,$4,$5::uuid[]) as id';
+    const ids=current.map(w=>w.id);
+    const group=(await db.query(save,[null,null,'易混淆测试','区分笔记',ids])).rows[0].id;
+    assert.equal((await db.query('select * from public.confusion_group_words')).rows.length,2);
+    await assert.rejects(db.query(save,[group,1,'无效修改','',[ids[0],ids[0]]]));
+    assert.equal((await db.query('select title from public.confusion_groups')).rows[0].title,'易混淆测试');
+    await db.query(save,[group,1,'已修改','',ids.reverse()]);
+    await assert.rejects(db.query(save,[group,1,'旧版本','',ids]));
+    await asUser(b);assert.equal((await db.query('select * from public.confusion_groups')).rows.length,0);
+    assert.equal((await db.query('select * from public.confusion_group_words')).rows.length,0);
+    await assert.rejects(db.query(save,[null,null,'越权','',ids]));
+    await asUser(a);
     assert.equal((await db.query('select public.delete_words_checked($1::jsonb) as count',[JSON.stringify(current)])).rows[0].count,2);
+    assert.equal((await db.query('select * from public.confusion_group_words')).rows.length,0);
+    assert.equal((await db.query('select * from public.confusion_groups')).rows.length,1,'empty groups retain notes');
     assert.equal((await db.query('select * from public.words')).rows.length,0);
     await db.exec('reset role; set role anon;'); await assert.rejects(db.query('select * from public.words'));
   } finally { await db.close(); }

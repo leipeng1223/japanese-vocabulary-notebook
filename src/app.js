@@ -1,7 +1,9 @@
 import { client, configured, fetchWords, fetchSources, addSource, writeWord, removeWords, insertWords } from './api.js';
 import { fields, cleanWord, parseText, parseBackup, uniqueNewWords } from './model.js';
+import { fetchGroups, updateConfusion, initConfusion } from './confusion.js';
 
 const $ = selector => document.querySelector(selector);
+initConfusion();
 let user = null, words = [], editing = null, importRows = [], channel = null;
 const reviewSessions = new Map();
 let starredOnly = false;
@@ -99,6 +101,10 @@ async function sync(quiet = false) {
     const [rows, names] = await Promise.all([fetchWords(), fetchSources()]);
     if (current !== generation || serial !== loadSerial || busy) return;
     words = rows; sources = names; renderSources(); renderWords(); status(`已同步 · ${new Date().toLocaleTimeString()}`);
+    try {
+      const groups = await fetchGroups();
+      if(current===generation && serial===loadSerial && !busy) { updateConfusion(groups,words); $('#confusion-status').textContent=''; }
+    } catch(error) { if(current===generation) $('#confusion-status').textContent=`易混淆分组同步失败：${error.message}`; }
   } catch (error) { if (current === generation) status(`同步失败，仍显示上次读取的数据：${error.message}`, true); }
 }
 async function mutation(button, action, done, errorTarget = '#status') {
@@ -256,6 +262,7 @@ async function applySession(session) {
   const next = session?.user || null;
   if (next?.id === user?.id && user) return;
   ++generation; ++lookupSerial; ++loadSerial; user = next; words = []; selected.clear(); reviewSessions.clear(); importRows = [];
+  updateConfusion([],[]); $('#confusion-search').value='';$('#confusion-status').textContent='';
   sources = []; activeSource = '逆转裁判'; renderSources();
   $('#json-file').value = ''; $('#import-text').value = ''; $('#import-summary').textContent = ''; $('#import-json-button').disabled = true;
   $('#word-form').reset(); $('#query').value = ''; $('#results').replaceChildren(); $('#dictionary-status').textContent = '';
