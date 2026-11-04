@@ -22,6 +22,7 @@ test('Postgres migration: RLS, transactional imports/deletes, versions, per-acco
     await db.exec(await readFile(new URL('../supabase/migrations/202610040001_sources.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/202610070001_starred.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/202610280001_confusion.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/202611040001_source_management.sql',import.meta.url),'utf8'));
     await asUser(a);
     assert.equal((await db.query('select is_starred from public.words limit 1')).rows[0].is_starred,false);
     await db.query('update public.words set is_starred=true where id=$1',[before[1].id]);
@@ -32,6 +33,13 @@ test('Postgres migration: RLS, transactional imports/deletes, versions, per-acco
     assert.equal((await db.query("select is_starred from public.words where source='日常生活'")).rows[0].is_starred,true);
     assert.equal((await db.query('select public.import_words($1::jsonb) as count',[JSON.stringify([{...rows[0],source:'日常生活'}])])).rows[0].count,0);
     await db.query("delete from public.words where source='日常生活'");
+    await db.query('select public.order_sources($1::text[])',[['日常生活','逆转裁判']]);
+    assert.equal((await db.query('select name from public.word_sources order by position')).rows[0].name,'日常生活');
+    await assert.rejects(db.query("select public.delete_source('逆转裁判',null)"));
+    await db.query("select public.delete_source('逆转裁判','日常生活')");
+    assert.equal((await db.query("select count(*)::integer as n from public.words where source='日常生活'")).rows[0].n,2);
+    await db.query("insert into public.word_sources(user_id,name) values($1,'逆转裁判')",[a]);
+    await db.query("select public.delete_source('日常生活','逆转裁判')");
     await asUser(b); assert.equal((await db.query('select * from public.words')).rows.length,0);
     assert.equal((await db.query('select * from public.word_sources')).rows.length,1);
     await assert.rejects(db.query('insert into public.word_sources(user_id,name) values($1,$2)',[a,'越权来源']));

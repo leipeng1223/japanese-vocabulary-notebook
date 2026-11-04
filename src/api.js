@@ -5,7 +5,7 @@ export const configured = Boolean(url && key && /^https:\/\//.test(url));
 // Only a publishable / legacy anon key belongs here. RLS enforces account isolation.
 export const client = configured ? createClient(url, key) : null;
 export async function fetchSources() {
-  const { data, error } = await client.from('word_sources').select('name').order('name');
+  const { data, error } = await client.from('word_sources').select('name').order('position').order('name');
   if (error) throw error;
   return data.map(row => row.name);
 }

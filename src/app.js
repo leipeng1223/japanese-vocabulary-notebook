@@ -4,6 +4,7 @@ import { fetchGroups, updateConfusion, initConfusion } from './confusion.js';
 
 const $ = selector => document.querySelector(selector);
 initConfusion();
+const manageSources=document.createElement('button');manageSources.id='manage-sources';manageSources.textContent='管理来源';document.querySelector('.source-bar').append(manageSources);
 let user = null, words = [], editing = null, importRows = [], channel = null;
 const reviewSessions = new Map();
 let starredOnly = false;
@@ -19,16 +20,44 @@ const selected = new Set();
 let sources = [], activeSource = '逆转裁判';
 const sourceWords = () => words.filter(row => (row.source || '逆转裁判') === activeSource);
 function renderSources() {
-  const names = [...new Set(['逆转裁判', ...sources, ...words.map(row => row.source || '逆转裁判')])];
+  const names = [...new Set([...sources, ...words.map(row => row.source || '逆转裁判')])];
+  if(!names.length) names.push('逆转裁判');
+  if(!names.includes(activeSource))activeSource=names[0];
   $('#source-tabs').replaceChildren();
   for (const name of names) {
     const button = element('button', name === activeSource ? 'primary' : '', name);
     button.type = 'button'; button.setAttribute('aria-pressed', String(name === activeSource));
+    button.draggable=true;
+    button.ondragstart=event=>event.dataTransfer.setData('text/plain',name);
+    button.ondragover=event=>event.preventDefault();
+    button.ondrop=event=>{event.preventDefault();const from=event.dataTransfer.getData('text/plain');if(!names.includes(from)||from===name)return;const order=names.filter(n=>n!==from);order.splice(order.indexOf(name),0,from);saveSourceOrder(order);};
     button.onclick = () => { if (busy) return; activeSource = name; selected.clear(); $('#search').value = ''; renderSources(); renderWords(); };
     $('#source-tabs').append(button);
   }
   $('#source-context').textContent = `当前来源：${activeSource} · 新增和导入单词将保存到此来源`;
 }
+async function saveSourceOrder(order){
+  await mutation($('#manage-sources'),async()=>{const {error}=await client.rpc('order_sources',{names:order});if(error)throw error;},()=>{sources=order;renderSources();});
+}
+$('#manage-sources').onclick=()=>{
+  const dialog=$('#sources-dialog'),list=$('#sources-manager');list.replaceChildren();
+  sources.forEach((name,index)=>{
+    const row=element('div','actions',''),label=element('span','',name);
+    const up=element('button','','↑'),down=element('button','','↓'),remove=element('button','danger','删除');
+    up.disabled=index===0;down.disabled=index===sources.length-1;
+    remove.disabled=sources.length===1;remove.title=sources.length===1?'至少保留一个来源':'';
+    for(const [button,offset] of [[up,-1],[down,1]])button.onclick=async()=>{const order=[...sources];[order[index],order[index+offset]]=[order[index+offset],order[index]];await saveSourceOrder(order);$('#manage-sources').click();};
+    remove.onclick=()=>{
+      const targets=sources.filter(n=>n!==name),count=words.filter(w=>w.source===name).length;
+      const target=count?prompt(`将「${name}」的 ${count} 个单词转移到哪个来源？请输入完整名称：\n${targets.join('\n')}`):null;
+      if(count&&!targets.includes(target)){status('未删除：请选择其他已有来源',true);return;}
+      if(!confirm(`删除来源「${name}」？${count?'单词将转移，易混淆分组保留。':'不会删除任何单词。'}`))return;
+      mutation(remove,async()=>{const {error}=await client.rpc('delete_source',{source_name:name,target_name:target});if(error)throw error;},()=>dialog.close());
+    };
+    row.append(label,up,down,remove);list.append(row);
+  });
+  if(!dialog.open)dialog.showModal();
+};
 const status = (message, error = false) => { $('#status').textContent = message; $('#status').classList.toggle('error', error); };
 function element(tag, className, text) { const node = document.createElement(tag); node.className = className; node.textContent = text; return node; }
 function cardActions(row) {
