@@ -1,5 +1,5 @@
 import { client, configured, fetchWords, fetchSources, addSource, writeWord, removeWords, insertWords } from './api.js';
-import { fields, cleanWord, parseText, parseBackup, uniqueNewWords } from './model.js';
+import { fields, cleanWord, parseText, parseBackup, uniqueNewWords, matchesWord } from './model.js';
 import { fetchGroups, updateConfusion, initConfusion } from './confusion.js';
 
 const $ = selector => document.querySelector(selector);
@@ -89,7 +89,7 @@ function starButton(row) {
 }
 function visibleWords() {
   const query = $('#search').value.trim().toLowerCase();
-  const rows = sourceWords().filter(row => fields.map(f => row[f]).join(' ').toLowerCase().includes(query));
+  const rows = sourceWords().filter(row => matchesWord(row,query));
   return rows.sort((a, b) => $('#sort').value === 'word' ? a.word.localeCompare(b.word, 'ja') : ($('#sort').value === 'oldest' ? 1 : -1) * (a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)));
 }
 function renderSelection() {

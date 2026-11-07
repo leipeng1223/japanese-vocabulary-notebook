@@ -1,4 +1,5 @@
 import { client } from './api.js';
+import { matchesWord } from './model.js';
 const $ = selector => document.querySelector(selector);
 const node = (tag, cls, text='') => { const el=document.createElement(tag);el.className=cls;el.textContent=text;return el; };
 let groups=[], words=[], editing=null, chosen=[], pending=false, selfTest=false;
@@ -14,7 +15,7 @@ export function updateConfusion(rows, vocabulary) { groups=rows;words=vocabulary
 function render() {
   const list=$('#confusion-list');list.replaceChildren();
   const query=$('#confusion-search').value.trim().toLowerCase();
-  const visible=groups.filter(g=>[g.title,g.note,...g.confusion_group_words.map(m=>words.find(w=>w.id===m.word_id)?.word||'')].join(' ').toLowerCase().includes(query));
+  const visible=groups.filter(g=>[g.title,g.note].join(' ').toLowerCase().includes(query)||g.confusion_group_words.some(m=>{const word=words.find(w=>w.id===m.word_id);return word&&matchesWord(word,query);}));
   $('#confusion-count').textContent=`共 ${groups.length} 个易混淆组 · 跨来源展示`;
   if(!visible.length)list.append(node('p','empty',groups.length?'没有匹配的分组。':'还没有易混淆组，选择两个或更多已有单词开始对比。'));
   for(const group of visible){
@@ -66,7 +67,7 @@ function renderPicker(){
   });
   $('#group-selected-count').textContent=`已选 ${chosen.length} 个 · 至少选 2 个，可跨来源选择`;
   const query=$('#group-query').value.trim().toLowerCase(),source=$('#group-source').value;
-  const matches=words.filter(w=>(!source||w.source===source)&&[w.word,w.reading,w.meaning].join(' ').toLowerCase().includes(query));
+  const matches=words.filter(w=>(!source||w.source===source)&&matchesWord(w,query));
   if(!matches.length)list.append(node('p','muted','没有匹配的单词'));
   for(const word of matches){
     const label=node('label','picker-word'),check=document.createElement('input');check.type='checkbox';check.checked=chosen.includes(word.id);check.setAttribute('aria-label',`加入 ${word.word}`);

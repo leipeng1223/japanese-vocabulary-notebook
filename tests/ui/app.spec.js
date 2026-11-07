@@ -175,3 +175,18 @@ for(const width of [375,768,1280]) test(`layout no overlap at ${width}px, includ
   expect(await inspect('#word-form .actions, #word-form .dialog-header')).not.toContain(true);
   expect(await page.locator('#word-dialog').evaluate(node=>node.scrollWidth<=node.clientWidth+1)).toBe(true);
 });
+
+test('romaji searches saved words, group selection and existing groups',async({page})=>{
+  const state=await mockCloud(page);await login(page);
+  await page.locator('#search').fill('SHOU KO HIN');await expect(page.locator('#word-list h2')).toHaveText('証拠品');
+  await page.locator('#search').fill('kagu');await expect(page.locator('#word-list h2')).toHaveCount(0);
+  state.rows.push({...initial,id:'furniture',word:'家具',reading:'かぐ',source:'逆转裁判',meaning:'家具'});
+  await page.locator('#search').fill('');await page.locator('#refresh').click();await expect(page.locator('#word-count')).toHaveText('共 2 个单词');
+  await page.getByRole('button',{name:'易混淆',exact:true}).click();await page.locator('#add-confusion').click();
+  await page.locator('#group-query').fill('KAGU');await expect(page.locator('#group-picker .picker-word')).toHaveCount(1);
+  await page.getByLabel('加入 家具',{exact:true}).check();await page.locator('#group-query').fill('shoukohin');await page.getByLabel('加入 証拠品',{exact:true}).check();
+  await page.locator('#save-confusion').click();await expect(page.locator('#confusion-dialog')).not.toBeVisible();
+  await page.locator('#confusion-search').fill('KAGU');await expect(page.locator('.confusion-group')).toHaveCount(1);
+  await page.locator('#confusion-search').fill('shouko hin');await expect(page.locator('.confusion-group')).toHaveCount(1);
+  await page.locator('#confusion-search').fill('gakkou');await expect(page.locator('.confusion-group')).toHaveCount(0);
+});

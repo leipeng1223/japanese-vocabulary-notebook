@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { readingRomaji } from '../src/model.js';
 import { PGlite } from '@electric-sql/pglite';
 
 test('Postgres migration: RLS, transactional imports/deletes, versions, per-account quota', async () => {
@@ -23,6 +24,16 @@ test('Postgres migration: RLS, transactional imports/deletes, versions, per-acco
     await db.exec(await readFile(new URL('../supabase/migrations/202610070001_starred.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/202610280001_confusion.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../supabase/migrations/202611040001_source_management.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../supabase/migrations/202611070001_romaji.sql',import.meta.url),'utf8'));
+    for(const reading of ['かぐ','しょうこひん','がっこう','まっちゃ','しんよう','しんきゃく','スーパー','らーめん','コーヒー','ティッシュ','キャット','ヴァイオリン','んあ','きゃく','おきもの','','証拠品','かぐ（家具）']) {
+      assert.equal((await db.query('select public.reading_romaji($1) as value',[reading])).rows[0].value,readingRomaji(reading),reading);
+    }
+    assert.equal((await db.query('select romaji from public.words where word=$1',['証拠品'])).rows[0].romaji,'shoukohin');
+    await asUser(a);
+    await db.query("update public.words set reading='かぐ',romaji='wrong' where word='証拠品'");
+    assert.equal((await db.query('select romaji from public.words where word=$1',['証拠品'])).rows[0].romaji,'kagu');
+    await db.query("update public.words set reading='しょうこひん' where word='証拠品'");
+
     await asUser(a);
     assert.equal((await db.query('select is_starred from public.words limit 1')).rows[0].is_starred,false);
     await db.query('update public.words set is_starred=true where id=$1',[before[1].id]);

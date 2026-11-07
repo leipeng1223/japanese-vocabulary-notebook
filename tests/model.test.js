@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseText, parseBackup, uniqueNewWords } from '../src/model.js';
+import { parseText, parseBackup, uniqueNewWords, readingRomaji, matchesWord } from '../src/model.js';
 import { normalizeQuery, lookup, createHandler } from '../supabase/functions/dictionary/core.js';
 
 test('mixed spaces, kana and missing readings import correctly', () => {
@@ -43,4 +43,12 @@ test('cloud function rejects anonymous calls, untrusted origins and exhausted qu
   assert.equal((await handler(request({Origin:'https://bad.test'}))).status,403);
   assert.equal((await handler(request({Authorization:'Bearer valid'}))).status,429);
   assert.equal(calls,0);
+});
+
+test('romaji derives only from kana and all word search normalizes case and spaces',()=>{
+  assert.equal(readingRomaji('かぐ'),'kagu');assert.equal(readingRomaji('しょうこひん'),'shoukohin');assert.equal(readingRomaji('がっこう'),'gakkou');
+  assert.equal(readingRomaji(''),'');assert.equal(readingRomaji('証拠品'),'');
+  assert.equal(parseBackup('[{"word":"家具","reading":"かぐ","romaji":"wrong"}]')[0].romaji,'kagu');
+  for(const query of ['KAGU','kagu','ＫＡＧＵ','ka gu','家具'])assert.equal(matchesWord({word:'家具',reading:'かぐ'},query),true);
+  assert.equal(matchesWord({word:'家具',reading:'かぐ'},'shoukohin'),false);
 });
