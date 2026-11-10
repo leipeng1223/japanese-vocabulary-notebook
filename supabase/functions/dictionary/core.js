@@ -1,3 +1,4 @@
+import { localizeLabel } from './labels.js';
 import { toHiragana } from 'wanakana';
 export function normalizeQuery(raw) {
   const input = raw.normalize('NFKC').trim();
@@ -18,14 +19,13 @@ export function uniquePhrases(values) {
     if(!key||seen.has(key))return false;seen.add(key);return true;
   });
 }
-const labels={ 'Noun':'名','Na-adjective (keiyodoshi)':'な形','I-adjective (keiyoushi)':'い形','Suru verb':'する','Transitive verb':'他','Intransitive verb':'自','Ichidan verb':'一段動','Adverb (fukushi)':'副','Expressions (phrases, clauses, etc.)':'表現','Buddhism':'仏教','Archaism':'古語','Colloquialism':'口語','Humble (kenjougo) language':'謙譲語','Honorific or respectful (sonkeigo) language':'尊敬語' };
 const senseNumber=index=>index<20?String.fromCodePoint(0x2460+index):String(index+1)+'.';
 function senseLabel(sense) {
-  return uniquePhrases([...sense.partsOfSpeech,...sense.tags].map(value=>labels[value]||(value.startsWith('Godan verb')?'五段動':value))).join('・');
+  return uniquePhrases([...sense.partsOfSpeech,...sense.tags].map((value,index)=>localizeLabel(value,index<sense.partsOfSpeech.length?'词性':'用法'))).join('・');
 }
 function formatSense(sense,index,text) {
   const label=senseLabel(sense);
-  const notes=[...sense.info,...sense.restrictions.map(value=>'限用：'+value)];
+  const notes=uniquePhrases([...sense.info.map(value=>localizeLabel(value,'说明')),...sense.restrictions.map(value=>'限用：'+value)]);
   return senseNumber(index)+(label?'〔'+label+'〕':'')+text+(notes.length?'（'+notes.join('；')+'）':'');
 }
 export async function lookup(query, key, fetcher = fetch) {
@@ -35,7 +35,7 @@ export async function lookup(query, key, fetcher = fetch) {
   const results=payload.data.slice(0,8).map(entry=>{
     const form=entry.japanese?.find(f=>f.word===query||f.reading===query)||entry.japanese?.[0]||{};
     const senses=(entry.senses||[]).map(s=>({definitions:uniquePhrases(s.english_definitions||[]),partsOfSpeech:uniquePhrases(s.parts_of_speech||[]),tags:uniquePhrases(s.tags||[]),info:uniquePhrases(s.info||[]),restrictions:uniquePhrases(s.restrictions||[]),meaning:''})).filter(s=>s.definitions.length);
-    return {word:form.word||form.reading||'',reading:form.reading||'',meaning:'',senses,definitionEn:senses.map(s=>s.definitions.join('；')).join('\n'),partOfSpeech:senses[0]?.partsOfSpeech.join(' · ')||''};
+    return {word:form.word||form.reading||'',reading:form.reading||'',meaning:'',senses,definitionEn:senses.map(s=>s.definitions.join('；')).join('\n'),partOfSpeech:senses[0]?.partsOfSpeech.map(value=>localizeLabel(value,'词性')).join('・')||''};
   }).filter(item=>item.word&&item.senses.length);
   let warning='';
   if(results.length){

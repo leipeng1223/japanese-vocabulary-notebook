@@ -1,7 +1,8 @@
+import { localizeMeaningLabels } from '../supabase/functions/dictionary/labels.js';
 import { client } from './api.js';
 import { matchesWord } from './model.js';
 const $ = selector => document.querySelector(selector);
-const node = (tag, cls, text='') => { const el=document.createElement(tag);el.className=cls;el.textContent=text;return el; };
+const node = (tag, cls, text='') => { const el=document.createElement(tag);el.className=cls;el.textContent=cls==='meaning'?localizeMeaningLabels(text):text;return el; };
 let groups=[], words=[], editing=null, chosen=[], pending=false, selfTest=false;
 export async function fetchGroups() {
   const all=[];

@@ -1,3 +1,4 @@
+import { localizeMeaningLabels } from '../supabase/functions/dictionary/labels.js';
 import { client, configured, fetchWords, fetchSources, addSource, writeWord, removeWords, insertWords } from './api.js';
 import { fields, cleanWord, parseText, parseBackup, uniqueNewWords, matchesWord } from './model.js';
 import { fetchGroups, updateConfusion, initConfusion } from './confusion.js';
@@ -59,7 +60,7 @@ $('#manage-sources').onclick=()=>{
   if(!dialog.open)dialog.showModal();
 };
 const status = (message, error = false) => { $('#status').textContent = message; $('#status').classList.toggle('error', error); };
-function element(tag, className, text) { const node = document.createElement(tag); node.className = className; node.textContent = text; return node; }
+function element(tag, className, text) { const node = document.createElement(tag); node.className = className; node.textContent = ['meaning','result-definition','result-english'].includes(className)?localizeMeaningLabels(text):text; return node; }
 function cardActions(row) {
   const actions = element('div', 'card-actions', '');
   const edit = element('button', 'edit-button', ''); edit.type = 'button';

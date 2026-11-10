@@ -70,7 +70,16 @@ test('dictionary retains every sense, labels and per-sense translation context',
  });
  assert.equal(contexts.length,4);assert.equal(result.results[0].senses.length,4);
  assert.equal(result.results[0].meaning.split('\n')[0],'①〔な形〕熟练；精通');
- assert.ok(result.results[0].meaning.includes('②〔名・する・仏教〕充分领略（original meaning；限用：堪能）'));
+ assert.ok(result.results[0].meaning.includes('②〔名・する・佛教〕充分领略（原义；限用:堪能）'));
  assert.ok(result.results[0].meaning.includes('④〔名〕fourth'));
  assert.deepEqual(contexts.find(c=>c.usage_tags.length).parts_of_speech,['Noun','Suru verb']);
+});
+
+test('known labels are localized and unknown labels preserve original English',async()=>{
+ const {localizeLabel,localizeMeaningLabels}=await import('../supabase/functions/dictionary/labels.js');
+ assert.equal(localizeLabel('Usually written using kana alone'),'通常用假名书写');
+ assert.equal(localizeLabel('Unknown future tag'),'Unknown future tag');
+ assert.equal(localizeMeaningLabels('①〔一段動・他・Usually written using kana alone〕测试'),'①〔一段動・他・通常用假名书写〕测试');
+ const result=await lookup('test','',async()=>Response.json({data:[{japanese:[{word:'試験',reading:'しけん'}],senses:[{english_definitions:['test'],parts_of_speech:['Unknown POS'],tags:['Usually written using kana alone','Unknown usage'],info:['unknown note']}]}]}));
+ const item=result.results[0];assert.equal(item.partOfSpeech,'Unknown POS');assert.equal(item.definitionEn.match(/〔([^〕]*)〕/)[1],'Unknown POS・通常用假名书写・Unknown usage');assert.deepEqual(item.senses[0].tags,['Usually written using kana alone','Unknown usage']);
 });
