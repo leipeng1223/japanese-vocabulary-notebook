@@ -23,7 +23,7 @@ const jisho = { data:[{ japanese:[{ word:'証拠品',reading:'しょうこひん
 test('translation errors retain dictionary results without labeling English as Chinese', async () => {
   let calls = 0;
   const result = await lookup('証拠品','test:fx',async () => ++calls === 1 ? Response.json(jisho) : Promise.reject(new Error('timeout')));
-  assert.equal(result.results[0].definitionEn,'evidence'); assert.equal(result.results[0].meaning,''); assert.ok(result.warning);
+  assert.equal(result.results[0].definitionEn,'①〔名〕evidence'); assert.equal(result.results[0].meaning,''); assert.ok(result.warning);
 });
 test('translation posts only definitions and returns Chinese; empty results skip translation', async () => {
   const result = await lookup('証拠品','test:fx',async (url, options) => {
@@ -32,7 +32,7 @@ test('translation posts only definitions and returns Chinese; empty results skip
     assert.deepEqual(JSON.parse(options.body).text,['evidence']);
     return Response.json({ translations:[{ text:'证物' }] });
   });
-  assert.equal(result.results[0].meaning,'证物'); assert.equal(result.warning,'');
+  assert.equal(result.results[0].meaning,'①〔名〕证物'); assert.equal(result.warning,'');
   let calls=0; await lookup('无结果','test:fx',async()=>{calls++;return Response.json({data:[]});}); assert.equal(calls,1);
 });
 test('cloud function rejects anonymous calls, untrusted origins and exhausted quota before external calls', async () => {
@@ -51,4 +51,26 @@ test('romaji derives only from kana and all word search normalizes case and spac
   assert.equal(parseBackup('[{"word":"家具","reading":"かぐ","romaji":"wrong"}]')[0].romaji,'kagu');
   for(const query of ['KAGU','kagu','ＫＡＧＵ','ka gu','家具'])assert.equal(matchesWord({word:'家具',reading:'かぐ'},query),true);
   assert.equal(matchesWord({word:'家具',reading:'かぐ'},'shoukohin'),false);
+});
+
+test('dictionary retains every sense, labels and per-sense translation context',async()=>{
+ const entry={data:[{japanese:[{word:'堪能',reading:'たんのう'}],senses:[
+ {english_definitions:['skilled',' skilled ','SKILLED','proficient'],parts_of_speech:['Na-adjective (keiyodoshi)']},
+ {english_definitions:['enjoying to the full'],parts_of_speech:['Noun','Suru verb'],tags:['Buddhism'],info:['original meaning'],restrictions:['堪能']},
+ {english_definitions:['third'],parts_of_speech:['Noun']},
+ {english_definitions:['fourth'],parts_of_speech:['Noun']}
+ ]}]};
+ const contexts=[];
+ const result=await lookup('堪能','test:fx',async(url,options)=>{
+ if(url.includes('jisho.org'))return Response.json(entry);
+ const body=JSON.parse(options.body),context=JSON.parse(body.context);contexts.push(context);
+ assert.equal(context.word,'堪能');assert.equal(context.reading,'たんのう');assert.equal(body.text.length,1);
+ const value=body.text[0]==='skilled；proficient'?'熟练；熟练；精通':body.text[0]==='enjoying to the full'?'充分领略':body.text[0];
+ return Response.json({translations:[{text:value}]});
+ });
+ assert.equal(contexts.length,4);assert.equal(result.results[0].senses.length,4);
+ assert.equal(result.results[0].meaning.split('\n')[0],'①〔な形〕熟练；精通');
+ assert.ok(result.results[0].meaning.includes('②〔名・する・仏教〕充分领略（original meaning；限用：堪能）'));
+ assert.ok(result.results[0].meaning.includes('④〔名〕fourth'));
+ assert.deepEqual(contexts.find(c=>c.usage_tags.length).parts_of_speech,['Noun','Suru verb']);
 });

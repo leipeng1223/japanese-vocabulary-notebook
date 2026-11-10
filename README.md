@@ -118,3 +118,11 @@ npm run build
 - 登录：https://supabase.com/docs/reference/javascript/auth-signinwithpassword
 - 云端密钥：https://supabase.com/docs/guides/functions/secrets
 - 函数认证：https://supabase.com/docs/guides/functions/auth
+
+## 本地查词预览
+
+双击 `启动本地预览.command`（或运行 `npm run dev`）。开发模式在本机运行与云端相同的查词逻辑，不调用线上 dictionary 函数。Jisho、DeepL 仍需联网；Supabase 登录、词条、来源与分组仍连接真实云端数据库。增删改会影响线上数据。
+
+将 `.env.local.example` 复制为 `.env.local`，填写 `DEEPL_API_KEY` 后重启服务。该变量只在本机服务端读取，不得加 `VITE_` 前缀。没有 Key 时仍可查询英文义项。云端已有 Secret 不能自动下载到本地。
+
+本机服务只监听 127.0.0.1 并检查同源请求、Supabase 登录令牌；本地试用不消耗线上 dictionary 查词次数，但仍消耗 Jisho/DeepL 服务资源及翻译额度。生产构建和 GitHub Pages 继续使用云端函数。

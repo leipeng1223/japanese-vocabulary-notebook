@@ -240,7 +240,19 @@ $('#dictionary-form').onsubmit = async event => {
   const serial = ++lookupSerial, current = generation;
   $('#lookup-submit').disabled = true; $('#results').replaceChildren(); $('#dictionary-status').textContent = '正在查询词典并翻译…';
   try {
-    const { data, error } = await client.functions.invoke('dictionary', { body: { query } });
+    let data,error;
+    if(import.meta.env.DEV && import.meta.env.VITE_LOCAL_DICTIONARY!=='0'){
+      const {data:session,error:sessionError}=await client.auth.getSession();
+      if(sessionError||!session.session)throw new Error('本地网页尚未登录，请在此地址登录后再查词。');
+      const request=token=>fetch('/api/local-dictionary',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({query})});
+      let response=await request(session.session.access_token);
+      if(response.status===401){
+        const {data:renewed,error:refreshError}=await client.auth.refreshSession();
+        if(refreshError||!renewed.session)throw new Error('登录已失效，请退出后重新登录本地单词本。');
+        response=await request(renewed.session.access_token);
+      }
+      data=await response.json();if(!response.ok)throw new Error(response.status===401?'登录校验未通过，请退出后重新登录本地单词本。':data.error||'本地查词失败');
+    }else ({data,error}=await client.functions.invoke('dictionary',{body:{query}}));
     if (error) throw new Error('查词暂不可用，请确认云端函数已部署且账号已获准查词。');
     if (data.error) throw new Error(data.error);
     if (serial !== lookupSerial || current !== generation) return;

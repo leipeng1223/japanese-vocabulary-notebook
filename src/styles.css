@@ -36,3 +36,5 @@
 @media(max-width:560px){.confusion-cards{grid-template-columns:minmax(0,1fr)}}
 
 .confusion-group .dialog-header .actions button{font-size:1rem}
+
+.result-definition,.result-english,.meaning{white-space:pre-line}

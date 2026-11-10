@@ -35,7 +35,7 @@ async function mockCloud(page) {
       if(method==='PATCH'){const row=state.rows.find(row=>`eq.${row.id}`===url.searchParams.get('id'));Object.assign(row,body,{version:row.version+1});return json(row);}
     }
     if(url.pathname.endsWith('/delete_words_checked')) { const ids=request.postDataJSON().targets.map(t=>t.id);state.rows=state.rows.filter(row=>!ids.includes(row.id));return json(ids.length); }
-    if(url.pathname.endsWith('/dictionary')) return json({query:'しょうこひん',warning:'',results:[{word:'証拠品の非常に長いテスト用語'.repeat(3),reading:'しょうこひん'.repeat(8),meaning:'这是用来验证长中文释义自动换行的测试文本。'.repeat(15),definitionEn:'Evidence '.repeat(80),partOfSpeech:'Noun'}]});
+    if(url.pathname.endsWith('/dictionary')) return json(state.dictionary||{query:'しょうこひん',warning:'',results:[{word:'証拠品の非常に長いテスト用語'.repeat(3),reading:'しょうこひん'.repeat(8),meaning:'这是用来验证长中文释义自动换行的测试文本。'.repeat(15),definitionEn:'Evidence '.repeat(80),partOfSpeech:'Noun'}]});
     return json({message:'unexpected test route'},404);
   });
   return state;
@@ -189,4 +189,17 @@ test('romaji searches saved words, group selection and existing groups',async({p
   await page.locator('#confusion-search').fill('KAGU');await expect(page.locator('.confusion-group')).toHaveCount(1);
   await page.locator('#confusion-search').fill('shouko hin');await expect(page.locator('.confusion-group')).toHaveCount(1);
   await page.locator('#confusion-search').fill('gakkou');await expect(page.locator('.confusion-group')).toHaveCount(0);
+});
+
+test('numbered senses stay on separate lines through dictionary save and reload',async({page})=>{
+ const state=await mockCloud(page);await login(page);
+ const meaning='①〔な形〕精通；擅长\n②〔名・する〕尽情享受';
+ state.dictionary={query:'堪能',warning:'',results:[{word:'堪能',reading:'たんのう',meaning,definitionEn:'①〔な形〕skilled\n②〔名・する〕enjoying to the full'}]};
+ await page.locator('#lookup').click();await page.locator('#query').fill('堪能');await page.locator('#lookup-submit').click();
+ await expect(page.locator('.result-definition')).toHaveText(meaning);
+ expect(await page.locator('.result-definition').evaluate(el=>getComputedStyle(el).whiteSpace)).toBe('pre-line');
+ await page.locator('.dictionary-result').click();await expect(page.locator('#word-form [name="meaning"]')).toHaveValue(meaning);
+ await page.getByRole('button',{name:'保存',exact:true}).click();await expect(page.locator('#word-count')).toHaveText('共 2 个单词');
+ expect(state.rows.find(w=>w.word==='堪能').meaning).toBe(meaning);
+ await page.reload();await expect(page.locator('#word-list .meaning').filter({hasText:'①〔な形〕'})).toHaveText(meaning);
 });
